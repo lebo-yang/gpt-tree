@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>3D Magic Photo Tree - Android Fix</title>
+    <title>3D Magic Photo Tree - Debug Mode</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #050505; font-family: sans-serif; touch-action: none; }
         #canvas-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; }
@@ -17,19 +17,35 @@
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; padding: 20px; box-sizing: border-box; }
         .hud { color: #FFD700; text-shadow: 0 0 10px rgba(255, 215, 0, 0.5); font-size: 11px; font-weight: bold; font-family: monospace; }
         
-        /* --- 修改点 1：隐藏视频预览框，但保持占位以免报错 --- */
+        /* 隐藏视频流 */
         .input_video { 
             position: absolute; 
             top: 0; left: 0; 
-            width: 1px; height: 1px; /* 缩小到几乎不可见 */
-            opacity: 0; /* 完全透明 */
+            width: 1px; height: 1px;
+            opacity: 0; 
             pointer-events: none; 
             z-index: -1; 
         }
 
         #upload-zone { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 100; pointer-events: auto; }
         .upload-label { background: rgba(255,215,0,0.15); border: 1px solid #FFD700; color: #FFD700; padding: 12px 24px; border-radius: 30px; cursor: pointer; font-size: 13px; }
-        #hand-pointer { position: absolute; width: 30px; height: 30px; border: 2px solid #FFD700; border-radius: 50%; pointer-events: none; z-index: 1000; display: none; transform: translate(-50%, -50%); box-shadow: 0 0 15px #FFD700; transition: border-color 0.2s; }
+        
+        /* --- 修改点：强化光标显示，方便在安卓端 debug --- */
+        #hand-pointer { 
+            position: absolute; 
+            width: 40px; 
+            height: 40px; 
+            border: 4px solid #ff0000; /* 强制红色粗边框 */
+            border-radius: 50%; 
+            pointer-events: none; 
+            z-index: 9999; 
+            display: block !important; /* 强制始终显示 */
+            transform: translate(-50%, -50%); 
+            box-shadow: 0 0 20px #ff0000; 
+            transition: border-color 0.2s, transform 0.1s ease-out; 
+            visibility: hidden; /* 默认隐藏，有手时变为 visible */
+        }
+        
         #error-msg { color: #ff4444; font-size: 12px; margin-top: 10px; display: none; }
     </style>
 </head>
@@ -37,7 +53,7 @@
 
     <div id="overlay">
         <h1 style="margin-bottom: 5px;">🎄 圣诞手势相册 🎄</h1>
-        <p style="font-size: 13px; margin-bottom: 25px; opacity: 0.8;">张开手掌：散开粒子 | 握拳/捏合：组成树并抓取照片</p>
+        <p style="font-size: 13px; margin-bottom: 25px; opacity: 0.8;">看到 HAND FOUND 后，将手置于镜头中心</p>
         <button class="start-btn" id="mainBtn" onclick="initExperience()">开启魔法</button>
         <div id="error-msg">组件正在初始化，请稍后...</div>
     </div>
@@ -96,17 +112,10 @@
 
         window.initExperience = function() {
             const btn = document.getElementById('mainBtn');
-            btn.innerText = "初始化模型...";
+            btn.innerText = "加载中...";
             btn.disabled = true;
-            
             setupAudio();
             init3D();
-            
-            if (typeof Hands === 'undefined') {
-                document.getElementById('error-msg').style.display = 'block';
-                return;
-            }
-            
             setTimeout(() => {
                 document.getElementById('overlay').style.opacity = '0';
                 setTimeout(() => document.getElementById('overlay').style.display = 'none', 500);
@@ -124,26 +133,22 @@
                 source.connect(analyser); analyser.connect(audioCtx.destination);
                 dataArray = new Uint8Array(analyser.frequencyBinCount);
                 audio.play();
-            } catch (e) { console.log("Audio blocked"); }
+            } catch (e) { }
         }
 
         function init3D() {
             scene = new THREE.Scene();
             treeGroup = new THREE.Group();
             scene.add(treeGroup);
-
             camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.set(0, 12, 45);
-
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
             document.getElementById('canvas-container').appendChild(renderer.domElement);
-
             composer = new EffectComposer(renderer);
             composer.addPass(new RenderPass(scene, camera));
             composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.2, 0.4, 0.85));
-
             scene.add(new THREE.AmbientLight(0xffffff, 0.8));
             createTree();
             document.getElementById('photo-upload').addEventListener('change', handleUpload);
@@ -161,9 +166,8 @@
             topStar = new THREE.Mesh(new THREE.ExtrudeGeometry(starShape, { depth: 0.4, bevelEnabled: false }), new THREE.MeshBasicMaterial({ color: 0xFFD700 }));
             topStar.position.y = 17;
             treeGroup.add(topStar);
-
             const emojiTextures = [createEmojiTexture('⭐'), createEmojiTexture('🎄'), createEmojiTexture('🎁')];
-            for (let i = 0; i < 300; i++) {
+            for (let i = 0; i < 260; i++) {
                 const material = new THREE.SpriteMaterial({ map: emojiTextures[i % 3], transparent: true });
                 const sprite = new THREE.Sprite(material);
                 sprite.scale.set(0.8, 0.8, 1);
@@ -182,94 +186,55 @@
             const video = document.querySelector('.input_video');
             const pointer = document.getElementById('hand-pointer');
             const statusDisp = document.getElementById('status');
-            
-            // 确保视频标签属性，防止安卓浏览器拦截自动播放
-            video.setAttribute('autoplay', '');
-            video.setAttribute('muted', '');
-            video.setAttribute('playsinline', '');
-            
-            const HandsLib = window.Hands || (window.mediapipe && window.mediapipe.hands && window.mediapipe.hands.Hands);
-            
-            const hands = new HandsLib({
-                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-            });
+            const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
 
-            hands.setOptions({ 
-                maxNumHands: 1, 
-                modelComplexity: 0, 
-                minDetectionConfidence: 0.3, 
-                minTrackingConfidence: 0.3 
-            });
+            hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.4, minTrackingConfidence: 0.4 });
 
             hands.onResults((res) => {
-                // 只要有结果就视为 ACTIVE，哪怕没检测到手
                 statusDisp.innerText = "ACTIVE"; 
-
                 if (res.multiHandLandmarks && res.multiHandLandmarks.length > 0) {
+                    statusDisp.innerText = "HAND FOUND";
                     const pts = res.multiHandLandmarks[0];
                     const indexTip = pts[8];
                     const thumbTip = pts[4];
                     
-                    // 坐标映射修正：安卓端通常是镜像的
+                    // 屏幕坐标映射
                     const x = (1 - indexTip.x) * window.innerWidth;
                     const y = indexTip.y * window.innerHeight;
                     
-                    pointer.style.display = 'block';
-                    // 使用 translate3d 性能更好
-                    pointer.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+                    pointer.style.visibility = 'visible';
+                    pointer.style.left = x + 'px';
+                    pointer.style.top = y + 'px';
 
                     mouse.x = (x / window.innerWidth) * 2 - 1;
                     mouse.y = -(y / window.innerHeight) * 2 + 1;
 
+                    // 捏合判断
                     const dist = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
-                    
-                    // 逻辑：捏合(dist < 0.12) -> 树形态 + 选中照片
-                    if (dist < 0.12) { 
+                    if (dist < 0.15) { // 稍微放宽了阈值
                         switchState('tree');
-                        pointer.style.borderColor = "#FF0000"; 
+                        pointer.style.borderColor = "#00ff00"; // 捏合时变绿
                         checkIntersection(true); 
                     } else {
                         switchState('scatter');
-                        pointer.style.borderColor = "#FFD700"; 
+                        pointer.style.borderColor = "#ff0000"; // 张开时变红
                         checkIntersection(false); 
                     }
-                    
-                    statusDisp.innerText = "HAND FOUND";
                 } else {
-                    pointer.style.display = 'none';
+                    pointer.style.visibility = 'hidden';
                 }
             });
 
-            // --- 修改点 2：安卓端 Edge 兼容性核心 ---
-            // 判断是否是移动端
-            const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-            
-            // 移动端：强制请求 720p 竖屏分辨率 (width < height)
-            // 电脑端：强制请求 640p 横屏分辨率
-            const cameraConstraints = isMobile 
-                ? { width: 480, height: 640, facingMode: "user" } 
-                : { width: 640, height: 480 };
-
-            const cam = new window.Camera(video, { 
-                onFrame: async () => { 
-                    if(video.readyState >= 2) await hands.send({ image: video }); 
-                },
-                ...cameraConstraints
+            const cam = new Camera(video, {
+                onFrame: async () => { await hands.send({ image: video }); },
+                width: 480, height: 640
             });
-            
-            cam.start().then(() => {
-                // 视频虽然开始播放，但CSS设置了隐藏，所以用户看不见
-                console.log("Camera started");
-            }).catch(err => {
-                statusDisp.innerText = "CAM_ERR";
-                console.error(err);
-            });
+            cam.start();
         }
 
         function checkIntersection(isGrabbed) {
             raycaster.setFromCamera(mouse, camera);
             const intersects = raycaster.intersectObjects(boxes);
-            
             if (intersects.length > 0) {
                 const box = intersects[0].object;
                 if (isGrabbed) {
@@ -278,11 +243,9 @@
                         selectedBox = box;
                         expandBox(box);
                     }
-                } else {
-                    if (selectedBox) {
-                        shrinkBox(selectedBox);
-                        selectedBox = null;
-                    }
+                } else if (selectedBox) {
+                    shrinkBox(selectedBox);
+                    selectedBox = null;
                 }
             } else if (selectedBox) {
                 shrinkBox(selectedBox);
@@ -293,13 +256,11 @@
         function expandBox(box) {
             gsap.to(box.position, { x: 0, y: 12, z: 35, duration: 0.6, ease: "power2.out" });
             gsap.to(box.scale, { x: 5.5, y: 5.5, z: 5.5, duration: 0.6 });
-            gsap.to(box.rotation, { y: Math.PI * 2, duration: 0.6 });
         }
 
         function shrinkBox(box) {
             gsap.to(box.position, { x: box.userData.originPos.x, y: box.userData.originPos.y, z: box.userData.originPos.z, duration: 0.4 });
             gsap.to(box.scale, { x: 1, y: 1, z: 1, duration: 0.4 });
-            gsap.to(box.rotation, { y: 0, duration: 0.4 });
         }
 
         function handleUpload(e) {
@@ -315,7 +276,7 @@
                     box.position.set(0, -30, 0);
                     box.userData.originPos = pos.clone();
                     treeGroup.add(box);
-                    gsap.to(box.position, { x: pos.x, y: pos.y, z: pos.z, duration: 1.5, ease: "back.out(1.2)" });
+                    gsap.to(box.position, { x: pos.x, y: pos.y, z: pos.z, duration: 1.5 });
                     boxes.push(box);
                 });
             }
@@ -336,7 +297,6 @@
                 analyser.getByteFrequencyData(dataArray);
                 let avg = dataArray.reduce((a,b) => a+b) / dataArray.length;
                 topStar.scale.set(1+avg/70, 1+avg/70, 1+avg/70);
-                topStar.rotation.z += 0.01;
             }
             if (!selectedBox) treeGroup.rotation.y += 0.005;
             composer.render();
