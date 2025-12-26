@@ -17,10 +17,10 @@
         #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; padding: 20px; box-sizing: border-box; }
         .hud { color: #FFD700; text-shadow: 0 0 10px rgba(255, 215, 0, 0.5); font-size: 11px; font-weight: bold; font-family: monospace; }
         /* 针对手机端调整预览窗口，确保不遮挡内容 */
-        .input_video { position: absolute; top: 10px; right: 10px; width: 90px; height: 120px; border-radius: 8px; opacity: 0.3; transform: scaleX(-1); border: 1px solid #FFD700; pointer-events: none; background: #000; object-fit: cover; }
+        .input_video { position: absolute; top: 10px; right: 10px; width: 120px; height: 160px; border-radius: 8px; opacity: 0.8; transform: scaleX(-1); border: 2px solid #FFD700; pointer-events: none; background: #000; object-fit: cover; z-index: 999; }
         #upload-zone { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 100; pointer-events: auto; }
         .upload-label { background: rgba(255,215,0,0.15); border: 1px solid #FFD700; color: #FFD700; padding: 12px 24px; border-radius: 30px; cursor: pointer; font-size: 13px; }
-        #hand-pointer { position: absolute; width: 30px; height: 30px; border: 2px solid #FFD700; border-radius: 50%; pointer-events: none; z-index: 1000; display: none; transform: translate(-50%, -50%); box-shadow: 0 0 15px #FFD700; }
+        #hand-pointer { position: absolute; width: 30px; height: 30px; border: 2px solid #FFD700; border-radius: 50%; pointer-events: none; z-index: 1000; display: none; transform: translate(-50%, -50%); box-shadow: 0 0 15px #FFD700; transition: border-color 0.2s; }
         #error-msg { color: #ff4444; font-size: 12px; margin-top: 10px; display: none; }
     </style>
 </head>
@@ -28,12 +28,12 @@
 
     <div id="overlay">
         <h1 style="margin-bottom: 5px;">🎄 圣诞手势相册 🎄</h1>
-        <p style="font-size: 13px; margin-bottom: 25px; opacity: 0.8;">手机端请竖屏使用，光线充足</p>
+        <p style="font-size: 13px; margin-bottom: 25px; opacity: 0.8;">张开手掌：散开粒子 | 握拳/捏合：组成树并抓取照片</p>
         <button class="start-btn" id="mainBtn" onclick="initExperience()">开启魔法</button>
         <div id="error-msg">组件正在初始化，请稍后...</div>
     </div>
 
-    <video class="input_video" playsinline></video>
+    <video class="input_video" playsinline muted autoplay></video>
     <div id="hand-pointer"></div>
     
     <div id="ui-layer">
@@ -169,11 +169,15 @@
             }
         }
 
-        // --- 重点改进部分：手机端兼容性识别函数 ---
         async function initMediaPipe() {
             const video = document.querySelector('.input_video');
             const pointer = document.getElementById('hand-pointer');
             const statusDisp = document.getElementById('status');
+            
+            // 确保手机端兼容性设置
+            video.setAttribute('autoplay', '');
+            video.setAttribute('muted', '');
+            video.setAttribute('playsinline', '');
             
             const HandsLib = window.Hands || (window.mediapipe && window.mediapipe.hands && window.mediapipe.hands.Hands);
             
@@ -181,12 +185,11 @@
                 locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
             });
 
-            // 手机端优化设置：使用 Lite 模型 (complexity 0)，降低置信度阈值
             hands.setOptions({ 
                 maxNumHands: 1, 
                 modelComplexity: 0, 
-                minDetectionConfidence: 0.4, 
-                minTrackingConfidence: 0.4 
+                minDetectionConfidence: 0.3, // 降低门槛，提高手机识别灵敏度
+                minTrackingConfidence: 0.3 
             });
 
             hands.onResults((res) => {
@@ -195,24 +198,35 @@
                     const indexTip = pts[8];
                     const thumbTip = pts[4];
                     
+                    // 坐标映射修正
+                    const x = (1 - indexTip.x) * window.innerWidth;
+                    const y = indexTip.y * window.innerHeight;
+                    
                     pointer.style.display = 'block';
-                    // 修正坐标映射：考虑手机竖屏
-                    const screenX = (1 - indexTip.x) * window.innerWidth;
-                    const screenY = indexTip.y * window.innerHeight;
-                    pointer.style.left = screenX + 'px';
-                    pointer.style.top = screenY + 'px';
+                    pointer.style.transform = `translate3d(${x}px, ${y}px, 0)`;
 
-                    mouse.x = (screenX / window.innerWidth) * 2 - 1;
-                    mouse.y = -(screenY / window.innerHeight) * 2 + 1;
+                    mouse.x = (x / window.innerWidth) * 2 - 1;
+                    mouse.y = -(y / window.innerHeight) * 2 + 1;
 
+                    // 计算手指捏合距离
                     const dist = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
-                    if (dist < 0.1) { // 稍微放大判定范围，适应手机端
-                        switchState('scatter');
-                        if(selectedBox) shrinkBox(selectedBox);
-                    } else {
+                    
+                    // --- 核心逻辑修改 ---
+                    // 阈值设为0.12，小于此值认为手掌闭合/捏合
+                    if (dist < 0.12) { 
+                        // 1. 手掌闭合 -> 形成树
                         switchState('tree');
-                        checkIntersection(); 
+                        pointer.style.borderColor = "#FF0000"; // 变红提示正在抓取
+                        // 2. 传入 true，表示正在“抓取”照片
+                        checkIntersection(true); 
+                    } else {
+                        // 1. 手掌张开 -> 散开粒子
+                        switchState('scatter');
+                        pointer.style.borderColor = "#FFD700"; // 恢复金色
+                        // 2. 传入 false，表示松开手，不选中照片
+                        checkIntersection(false); 
                     }
+                    
                     statusDisp.innerText = "ACTIVE";
                 } else {
                     pointer.style.display = 'none';
@@ -220,44 +234,62 @@
                 }
             });
 
-            // 修正：针对移动端强制请求竖屏比例，且降低分辨率减轻负载
             const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
             const cameraConstraints = isMobile ? { width: 480, height: 640 } : { width: 640, height: 480 };
 
             const cam = new window.Camera(video, { 
-                onFrame: async () => { await hands.send({ image: video }); },
+                onFrame: async () => { 
+                    if(video.readyState >= 2) await hands.send({ image: video }); 
+                },
                 ...cameraConstraints
             });
             
-            cam.start().catch(err => {
+            cam.start().then(() => {
+                video.style.display = "block";
+            }).catch(err => {
                 statusDisp.innerText = "CAM_ERR";
                 console.error(err);
             });
         }
 
-        function checkIntersection() {
+        // 修改后的交互检测函数，接收 isGrabbed 参数
+        function checkIntersection(isGrabbed) {
             raycaster.setFromCamera(mouse, camera);
             const intersects = raycaster.intersectObjects(boxes);
+            
             if (intersects.length > 0) {
                 const box = intersects[0].object;
-                if (selectedBox !== box) {
-                    if (selectedBox) shrinkBox(selectedBox);
-                    selectedBox = box;
-                    expandBox(box);
+                
+                // 只有当手是闭合(isGrabbed=true)状态下，才选中照片
+                if (isGrabbed) {
+                    if (selectedBox !== box) {
+                        if (selectedBox) shrinkBox(selectedBox);
+                        selectedBox = box;
+                        expandBox(box);
+                    }
+                } else {
+                    // 如果手张开了，即使指着照片也不放大，且如果有选中的要缩回去
+                    if (selectedBox) {
+                        shrinkBox(selectedBox);
+                        selectedBox = null;
+                    }
                 }
             } else if (selectedBox) {
+                // 如果手移开了（不管张开还是闭合），都要缩回去
                 shrinkBox(selectedBox);
                 selectedBox = null;
             }
         }
 
         function expandBox(box) {
-            gsap.to(box.position, { x: 0, y: 10, z: 25, duration: 0.6, ease: "power2.out" });
-            gsap.to(box.scale, { x: 4.5, y: 4.5, z: 4.5, duration: 0.6 });
+            // 让照片飞到屏幕最前面，并变大
+            gsap.to(box.position, { x: 0, y: 12, z: 35, duration: 0.6, ease: "power2.out" });
+            gsap.to(box.scale, { x: 5.5, y: 5.5, z: 5.5, duration: 0.6 });
             gsap.to(box.rotation, { y: Math.PI * 2, duration: 0.6 });
         }
 
         function shrinkBox(box) {
+            // 照片回到树上的原位
             gsap.to(box.position, { x: box.userData.originPos.x, y: box.userData.originPos.y, z: box.userData.originPos.z, duration: 0.4 });
             gsap.to(box.scale, { x: 1, y: 1, z: 1, duration: 0.4 });
             gsap.to(box.rotation, { y: 0, duration: 0.4 });
@@ -273,9 +305,11 @@
                     const y = t * 22 - 7;
                     const r = (1 - t) * 11 + 3.5;
                     const pos = new THREE.Vector3(r * Math.cos(t*22), y, r * Math.sin(t*22));
+                    // 初始位置在下方
                     box.position.set(0, -30, 0);
                     box.userData.originPos = pos.clone();
                     treeGroup.add(box);
+                    // 动画飞入树中
                     gsap.to(box.position, { x: pos.x, y: pos.y, z: pos.z, duration: 1.5, ease: "back.out(1.2)" });
                     boxes.push(box);
                 });
